@@ -1,94 +1,103 @@
 import streamlit as st
 import fitz
-from pdf2docx import Converter
+import pandas as pd
+import io
 import os
+import difflib
+from pdf2docx import Converter
 
-# Pagina instellingen
-st.set_page_config(page_title="Bedrijfs PDF Tool", layout="wide")
+st.set_page_config(page_title="Bedrijfs PDF Tool v2", layout="wide")
 
-# Zijmenu voor navigatie
+# Navigatie
 st.sidebar.title("🛠️ PDF Gereedschap")
-keuze = st.sidebar.radio("Wat wilt u doen?", ["PDF Vergelijker (Rood)", "PDF naar Word"])
+keuze = st.sidebar.radio("Wat wilt u doen?", ["Artikelzoeker (Excel)", "PDF Vergelijker (Rood)", "PDF naar Word"])
 
-# --- FUNCTIE 1: JOUW SPECIFIEKE PDF VERGELIJKER (ROOD) ---
-if keuze == "PDF Vergelijker (Rood)":
-    st.title("🔍 PDF Vergelijker")
-    st.write("Alle tekst in de nieuwe PDF die niet in de oude staat, wordt **rood** gemarkeerd.")
+# --- FUNCTIE 1: ARTIKELZOEKER ---
+if keuze == "Artikelzoeker (Excel)":
+    st.title("📦 Artikelzoeker & Excel Generator")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        old_file = st.file_uploader("Oude PDF (Referentie)", type="pdf")
-    with col2:
-        new_file = st.file_uploader("Nieuwe PDF (Controle)", type="pdf")
+    # Pad naar je Excel-bestand dat in DEZELFDE map op GitHub staat
+    EXCEL_FILE = "artikelen.xlsx" 
 
-    if old_file and new_file:
-        if st.button("Start Vergelijking"):
-            # Open PDF's vanuit geheugen
-            doc1 = fitz.open(stream=old_file.read(), filetype="pdf")
-            doc2 = fitz.open(stream=new_file.read(), filetype="pdf")
+    if not os.path.exists(EXCEL_FILE):
+        st.error(f"Fout: Bestand '{EXCEL_FILE}' niet gevonden in de GitHub repository.")
+    else:
+        @st.cache_data
+        def load_db(file):
+            return pd.read_excel(file)
+        
+        df_db = load_db(EXCEL_FILE)
+        st.success("Productdatabase geladen!")
+
+        pdf_file = st.file_uploader("Upload PDF om artikelen te matchen", type="pdf")
+
+        if pdf_file and st.button("Start Analyse"):
+            doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+            # Haal alle tekst uit PDF en zet in één grote string voor zoekopdracht
+            full_pdf_text = " ".join([page.get_text() for page in doc]).replace("\n", " ")
             
-            # Stap 1: Verzamel alle unieke tekst uit de oude PDF
-            old_text_pool = set()
-            for page in doc1:
-                for line in page.get_text().splitlines():
-                    clean = line.strip()
-                    if len(clean) > 3:
-                        old_text_pool.add(clean)
-
-            # Stap 2: Markeer verschillen in de nieuwe PDF
-            diff_count = 0
-            for page in doc2:
-                marked_on_this_page = set()
-                page_lines = page.get_text().splitlines()
+            gevonden_items = []
+            
+            # We lopen door de Excel en kijken of de Omschrijving of het Type voorkomt in de PDF
+            for _, row in df_db.iterrows():
+                # Pas hier de kolomnamen aan naar jouw Excel!
+                zoekterm = str(row['Omschrijving']).strip()
                 
-                for line in page_lines:
-                    clean_line = line.strip()
-                    
-                    if clean_line and clean_line not in old_text_pool:
-                        if clean_line not in marked_on_this_page:
-                            # Zoek locatie en markeer rood (1, 0, 0)
-                            for rect in page.search_for(clean_line):
-                                annot = page.add_highlight_annot(rect)
-                                annot.set_colors(stroke=(1, 0, 0)) 
-                                annot.update()
-                            marked_on_this_page.add(clean_line)
-                            diff_count += 1
-
-            # Resultaat opslaan voor download
-            out_pdf = doc2.write()
-            doc1.close()
-            doc2.close()
+                if len(zoekterm) > 4 and zoekterm.lower() in full_pdf_text.lower():
+                    gevonden_items.append({
+                        "Art. Nr.": row.get('Art. Nr.', 'N/B'),
+                        "Kortingsgroep": row.get('Kortingsgroep', 'N/B'),
+                        "Omschrijving": zoekterm
+                    })
             
-            st.success(f"Klaar! {diff_count} verschillen rood gemarkeerd.")
-            st.download_button("Download Resultaat PDF", out_pdf, "verschillen_rood.pdf", "application/pdf")
+            if gevonden_items:
+                res_df = pd.DataFrame(gevonden_items).drop_duplicates()
+                st.dataframe(res_df)
+                
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    res_df.to_excel(writer, index=False)
+                st.download_button("Download Resultaat Excel", output.getvalue(), "match_resultaat.xlsx")
+            else:
+                st.warning("Geen matches gevonden tussen de PDF en de Excel-database.")
 
-# --- FUNCTIE 2: PDF NAAR WORD ---
+# --- FUNCTIE 2: VERGELIJKER (JOUW CODE) ---
+elif keuze == "PDF Vergelijker (Rood)":
+    st.title("🔍 PDF Vergelijker")
+    col1, col2 = st.columns(2)
+    with col1: old_file = st.file_uploader("Oude PDF", type="pdf")
+    with col2: new_file = st.file_uploader("Nieuwe PDF", type="pdf")
+
+    if old_file and new_file and st.button("Vergelijk"):
+        doc1 = fitz.open(stream=old_file.read(), filetype="pdf")
+        doc2 = fitz.open(stream=new_file.read(), filetype="pdf")
+        pool = set(l.strip() for p in doc1 for l in p.get_text().splitlines() if len(l.strip()) > 3)
+        
+        diff_count = 0
+        for page in doc2:
+            marked = set()
+            for line in page.get_text().splitlines():
+                clean = line.strip()
+                if clean and clean not in pool and clean not in marked:
+                    for rect in page.search_for(clean):
+                        annot = page.add_highlight_annot(rect)
+                        annot.set_colors(stroke=(1, 0, 0))
+                        annot.update()
+                    marked.add(clean)
+                    diff_count += 1
+        
+        st.download_button("Download Resultaat", doc2.write(), "verschillen.pdf")
+
+# --- FUNCTIE 3: PDF NAAR WORD ---
 elif keuze == "PDF naar Word":
     st.title("📝 PDF naar Word Converter")
-    st.write("Zet een PDF-bestand om naar een bewerkbaar Word-document (.docx).")
-    
-    word_upload = st.file_uploader("Upload PDF voor conversie", type="pdf")
-    
-    if word_upload:
-        if st.button("Converteer naar Word"):
-            # Tijdelijk bestand opslaan voor de converter
-            with open("temp.pdf", "wb") as f:
-                f.write(word_upload.getbuffer())
-            
-            docx_file = "document.docx"
-            with st.spinner("Bezig met converteren..."):
-                # Gebruik de [pdf2docx bibliotheek](https://dreadm.github.io)
-                cv = Converter("temp.pdf")
-                cv.convert(docx_file)
-                cv.close()
-            
-            with open(docx_file, "rb") as f:
-                st.download_button("Download Word-bestand", f, "geconverteerd.docx", 
-                                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-            
-            # Opruimen
-            os.remove("temp.pdf")
-            os.remove(docx_file)
-
-st.sidebar.markdown("---")
-st.sidebar.caption("Versie 1.2 - Intern gebruik")
+    word_upload = st.file_uploader("Upload PDF", type="pdf")
+    if word_upload and st.button("Converteer"):
+        with open("temp.pdf", "wb") as f: f.write(word_upload.getbuffer())
+        cv = Converter("temp.pdf")
+        cv.convert("temp.docx")
+        cv.close()
+        with open("temp.docx", "rb") as f:
+            st.download_button("Download Word-bestand", f, "document.docx")
+        os.remove("temp.pdf")
+        os.remove("temp.docx")
