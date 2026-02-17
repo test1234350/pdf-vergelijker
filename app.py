@@ -3,15 +3,14 @@ import fitz
 import pandas as pd
 import io
 import os
-import re  # CRUCIAAL: Voegt de zoekfunctionaliteit toe
-import difflib
+import re
 from pdf2docx import Converter
 
-st.set_page_config(page_title="Bedrijfs PDF Tool v3", layout="wide")
+st.set_page_config(page_title="Bedrijfs PDF Tool v4", layout="wide")
 
-# Navigatie
-st.sidebar.title("🛠️ PDF Gereedschap")
-keuze = st.sidebar.radio("Wat wilt u doen?", ["Artikelzoeker & Korting", "PDF Vergelijker (Rood)", "PDF naar Word"])
+# --- NAVIGATIE ---
+st.sidebar.title("🛠️ PDF Tooling")
+keuze = st.sidebar.radio("Navigatie", ["Full Scan Matcher", "PDF Vergelijker", "PDF naar Word"])
 
 # --- FUNCTIE 1: FULL SCAN MATCHER ---
 if keuze == "Full Scan Matcher":
@@ -127,6 +126,7 @@ elif keuze == "PDF naar Word":
             st.download_button("Download Word", f, "document.docx")
         os.remove("temp.pdf")
         os.remove("temp.docx")
+
 
 
 
