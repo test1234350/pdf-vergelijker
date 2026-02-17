@@ -1,47 +1,52 @@
 import streamlit as st
 import fitz
-import difflib
+import os
 
-st.set_page_config(page_title="PDF Vergelijker Pro", layout="wide")
-st.title("📄 PDF Artikelen Vergelijker")
-st.write("Nieuw artikel = **Geel** | Kleine wijziging (bijv. prijs) = **Rood**")
+st.set_page_config(page_title="PDF Vergelijker", layout="centered")
+
+st.title("📄 PDF Vergelijker")
+st.write("Sleep twee PDF's hieronder om de verschillen **rood** te markeren.")
 
 col1, col2 = st.columns(2)
 with col1:
-    old_file = st.file_uploader("Oude PDF", type="pdf")
+    old_file = st.file_uploader("Oude PDF (Referentie)", type="pdf")
 with col2:
-    new_file = st.file_uploader("Nieuwe PDF", type="pdf")
+    new_file = st.file_uploader("Nieuwe PDF (Controle)", type="pdf")
 
 if old_file and new_file:
-    if st.button("Start Analyse"):
+    if st.button("Start Vergelijking"):
+        # Open PDF's vanuit geheugen
         doc1 = fitz.open(stream=old_file.read(), filetype="pdf")
         doc2 = fitz.open(stream=new_file.read(), filetype="pdf")
         
-        # Tekst extraheren en opschonen
-        text1 = [l.strip() for p in doc1 for l in p.get_text().splitlines() if len(l.strip()) > 3]
-        text2 = [l.strip() for p in doc2 for l in p.get_text().splitlines() if len(l.strip()) > 3]
+        # Maak pool van oude tekst
+        old_text_pool = set()
+        for page in doc1:
+            for line in page.get_text().splitlines():
+                if len(line.strip()) > 3:
+                    old_text_pool.add(line.strip())
 
-        # Verschillen bepalen
-        d = difflib.Differ()
-        diff = list(d.compare(text1, text2))
-        added_lines = [line[2:] for line in diff if line.startswith('+ ')]
-        
+        # Markeer verschillen in de nieuwe PDF
+        diff_count = 0
         for page in doc2:
             marked = set()
-            for line in added_lines:
-                if line not in marked:
-                    # Sneller GEEL: Alleen bij > 90% match wordt het ROOD
-                    # Gebruik de [SequenceMatcher](https://docs.python.org)
-                    is_modification = any(difflib.SequenceMatcher(None, line, old_l).ratio() > 0.9 for old_l in text1)
-                    
-                    color = (1, 0, 0) if is_modification else (1, 1, 0) # Rood vs Geel
-                    
-                    for rect in page.search_for(line):
+            for line in page.get_text().splitlines():
+                clean = line.strip()
+                if clean and clean not in old_text_pool and clean not in marked:
+                    for rect in page.search_for(clean):
                         annot = page.add_highlight_annot(rect)
-                        annot.set_colors(stroke=color)
+                        annot.set_colors(stroke=(1, 0, 0)) # Rood
                         annot.update()
-                    marked.add(line)
+                    marked.add(clean)
+                    diff_count += 1
 
+        # Opslaan in een buffer om te downloaden
         out_pdf = doc2.write()
-        st.success("Analyse voltooid! De tool heeft nu een strengere controle op 'nieuwe' artikelen.")
-        st.download_button("Download Resultaat", out_pdf, "verschil_analyse.pdf", "application/pdf")
+        st.success(f"Klaar! {diff_count} verschillen gevonden.")
+        
+        st.download_button(
+            label="Download Resultaat (PDF)",
+            data=out_pdf,
+            file_name="verschillen_geanalyseerd.pdf",
+            mime="application/pdf"
+        )
