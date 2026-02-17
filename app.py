@@ -16,7 +16,7 @@ keuze = st.sidebar.radio("Wat wilt u doen?", ["Artikelzoeker & Korting", "PDF Ve
 # --- FUNCTIE 1: DEEP SCAN ARTIKELZOEKER ---
 if keuze == "Artikelzoeker & Korting":
     st.title("🔬 Deep Scan: PDF naar Excel Matcher")
-    st.info("Deze versie scant de PDF op Art. Nr., Omschrijving 1/2 en Zoeknaam voor een maximale match.")
+    st.info("Scant Art. Nr., Omschrijving 1/2 en Zoeknaam voor maximale match.")
     
     EXCEL_FILE = "artikelen.xlsx" 
 
@@ -30,43 +30,52 @@ if keuze == "Artikelzoeker & Korting":
             return df
         
         df_db = load_db(EXCEL_FILE)
-        pdf_file = st.file_uploader("Upload PDF (Factuur / Lijst)", type="pdf")
+        pdf_file = st.file_uploader("Upload PDF", type="pdf")
 
         if pdf_file and st.button("Start Deep Scan"):
             doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-            gevonden_items = []
-
-            # Stap 1: Maak de PDF tekst 'schoon' (geen enters, alles kleine letters)
-            full_text_raw = " ".join()
+            
+            # STAP 1: FIX - Haal alle tekst op en voeg samen tot één grote string
+            pdf_pages_text = []
+            for page in doc:
+                page_text = page.get_text("text")
+                if page_text:
+                    pdf_pages_text.append(page_text)
+            
+            # Maak de tekst 'schoon' (geen enters, alles kleine letters)
+            full_text_raw = " ".join(pdf_pages_text)
             full_text_clean = " ".join(full_text_raw.split()).lower()
 
-            # Stap 2: Doorloop de database en match op meerdere kolommen
+            gevonden_items = []
+
+            # STAP 2: Doorloop de database en match op meerdere velden
             for _, row in df_db.iterrows():
+                # Haal waarden op en zet ze om naar kleine letters voor matching
                 art_nr = str(row.get('Art. Nr.', '')).strip().lower()
-                omschrijving1 = str(row.get('Omschrijving 1', '')).strip().lower()
-                omschrijving2 = str(row.get('Omschrijving 2', '')).strip().lower()
+                oms1 = str(row.get('Omschrijving 1', '')).strip().lower()
+                oms2 = str(row.get('Omschrijving 2', '')).strip().lower()
                 zoeknaam = str(row.get('Zoeknaam', '')).strip().lower()
 
-                # Controleer of één van de velden voorkomt in de PDF (minimaal 4 tekens om ruis te voorkomen)
                 match_found = False
                 match_term = ""
 
-                if art_nr and len(art_nr) > 3 and art_nr in full_text_clean:
+                # Zoek op Art. Nr. (minimaal 3 tekens), dan Omschrijvingen, dan Zoeknaam
+                if art_nr and len(art_nr) >= 3 and art_nr in full_text_clean:
                     match_found, match_term = True, art_nr
-                elif omschrijving1 and len(omschrijving1) > 5 and omschrijving1 in full_text_clean:
-                    match_found, match_term = True, omschrijving1
-                elif omschrijving2 and len(omschrijving2) > 5 and omschrijving2 in full_text_clean:
-                    match_found, match_term = True, omschrijving2
-                elif zoeknaam and len(zoeknaam) > 4 and zoeknaam in full_text_clean:
+                elif oms1 and len(oms1) > 4 and oms1 in full_text_clean:
+                    match_found, match_term = True, oms1
+                elif oms2 and len(oms2) > 4 and oms2 in full_text_clean:
+                    match_found, match_term = True, oms2
+                elif zoeknaam and len(zoeknaam) > 3 and zoeknaam in full_text_clean:
                     match_found, match_term = True, zoeknaam
 
                 if match_found:
-                    # Stap 3: Zoek korting in de buurt van de gevonden term
+                    # STAP 3: Zoek korting in de buurt van de gevonden term
                     start_pos = full_text_clean.find(match_term)
-                    # We kijken 100 tekens verder in de opgeschoonde tekst
+                    # We kijken 150 tekens verder voor de korting
                     context = full_text_clean[start_pos:start_pos + 150]
                     
-                    # Zoek naar percentage (bijv 25%) of getal met procent
+                    # Zoek naar percentage (bijv 25% of 25,00%)
                     korting_match = re.search(r'(\d+[\d,.]*)\s*%', context)
                     gevonden_korting = korting_match.group(0) if korting_match else "N/B"
 
@@ -79,7 +88,7 @@ if keuze == "Artikelzoeker & Korting":
 
             if gevonden_items:
                 res_df = pd.DataFrame(gevonden_items).drop_duplicates(subset=["Art. Nr."])
-                st.write(f"✅ Er zijn {len(res_df)} unieke artikelen gematched.")
+                st.write(f"✅ Succes: {len(res_df)} artikelen gevonden.")
                 st.dataframe(res_df)
                 
                 output = io.BytesIO()
@@ -87,7 +96,8 @@ if keuze == "Artikelzoeker & Korting":
                     res_df.to_excel(writer, index=False)
                 st.download_button("Download Resultaat Excel", output.getvalue(), "deep_scan_resultaat.xlsx")
             else:
-                st.warning("Geen matches gevonden. Controleer of de PDF doorzoekbare tekst bevat.")
+                st.warning("Geen matches gevonden. Controleer of de PDF doorzoekbaar is.")
+
 
 
 # --- FUNCTIE 2: VERGELIJKER ---
@@ -125,4 +135,5 @@ elif keuze == "PDF naar Word":
             st.download_button("Download Word", f, "document.docx")
         os.remove("temp.pdf")
         os.remove("temp.docx")
+
 
