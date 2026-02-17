@@ -35,23 +35,23 @@ if keuze == "Artikelzoeker & Korting":
         if pdf_file and st.button("Start Merk-Check & Scan"):
             doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
             
-            # STAP 1: PDF Tekst verzamelen en opschonen
+            # STAP 1: PDF Tekst verzamelen en opschonen (FIX: Regel samengevoegd)
             pdf_pages_text =
             full_text_clean = " ".join(" ".join(pdf_pages_text).split()).lower()
 
             # STAP 2: Welke merken staan in de PDF?
             alle_merken = df_db['Merknaam'].dropna().unique()
-            gevonden_merken = [m for m in alle_merken if str(m).lower() in full_text_clean]
+            gevonden_merken = [str(m) for m in alle_merken if str(m).lower() in full_text_clean]
 
             if gevonden_merken:
-                st.success(f"Gevonden merk(en) in PDF: {', '.join(map(str, gevonden_merken))}")
+                st.success(f"Gevonden merk(en) in PDF: {', '.join(gevonden_merken)}")
                 # Filter de database: alleen artikelen van de gevonden merken
-                df_filtered = df_db[df_db['Merknaam'].isin(gevonden_merken)]
+                df_filtered = df_db[df_db['Merknaam'].astype(str).isin(gevonden_merken)]
             else:
-                st.warning("Geen specifiek merk herkend in de PDF. Ik scan de volledige database.")
+                st.warning("Geen specifiek merk herkend. Ik scan de volledige database.")
                 df_filtered = df_db
 
-            # STAP 3: Artikelen matchen binnen de gefilterde lijst
+            # STAP 3: Artikelen matchen binnen de (gefilterde) lijst
             gevonden_items = []
             for _, row in df_filtered.iterrows():
                 art_nr = str(row.get('Art. Nr.', '')).strip().lower()
@@ -61,7 +61,7 @@ if keuze == "Artikelzoeker & Korting":
                 match_found = False
                 match_term = ""
 
-                # Zoek op Art. Nr., Omschrijving 1 of 2
+                # Match op Art. Nr. (min 3 tekens) of Omschrijvingen (min 5 tekens)
                 if art_nr and len(art_nr) >= 3 and art_nr in full_text_clean:
                     match_found, match_term = True, art_nr
                 elif oms1 and len(oms1) > 5 and oms1 in full_text_clean:
@@ -79,14 +79,14 @@ if keuze == "Artikelzoeker & Korting":
                     gevonden_items.append({
                         "Merk": row.get('Merknaam', 'N/B'),
                         "Art. Nr.": row.get('Art. Nr.', 'N/B'),
-                        "Omschrijving 1": row.get('Omschrijving 1', 'N/B'),
                         "Kortingsgroep": row.get('Kortingsgroep', 'N/B'),
-                        "Korting uit PDF": gevonden_korting
+                        "Korting uit PDF": gevonden_korting,
+                        "Omschrijving 1": row.get('Omschrijving 1', 'N/B')
                     })
 
             if gevonden_items:
                 res_df = pd.DataFrame(gevonden_items).drop_duplicates(subset=["Art. Nr."])
-                st.write(f"✅ Match voltooid: {len(res_df)} artikelen gevonden.")
+                st.write(f"✅ Match voltooid: {len(res_df)} unieke artikelen gevonden.")
                 st.dataframe(res_df)
                 
                 output = io.BytesIO()
@@ -95,6 +95,7 @@ if keuze == "Artikelzoeker & Korting":
                 st.download_button("Download Resultaat Excel", output.getvalue(), "merk_match_resultaat.xlsx")
             else:
                 st.warning("Geen artikelen gevonden die matchen met de PDF-inhoud.")
+
 
 
 
@@ -134,6 +135,7 @@ elif keuze == "PDF naar Word":
             st.download_button("Download Word", f, "document.docx")
         os.remove("temp.pdf")
         os.remove("temp.docx")
+
 
 
 
