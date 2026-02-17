@@ -16,50 +16,60 @@ keuze = st.sidebar.radio("Wat wilt u doen?", ["Artikelzoeker (Excel)", "PDF Verg
 if keuze == "Artikelzoeker (Excel)":
     st.title("📦 Artikelzoeker & Excel Generator")
     
-    # Pad naar je Excel-bestand dat in DEZELFDE map op GitHub staat
     EXCEL_FILE = "artikelen.xlsx" 
 
     if not os.path.exists(EXCEL_FILE):
-        st.error(f"Fout: Bestand '{EXCEL_FILE}' niet gevonden in de GitHub repository.")
+        st.error(f"Fout: Bestand '{EXCEL_FILE}' niet gevonden.")
     else:
         @st.cache_data
         def load_db(file):
-            return pd.read_excel(file)
+            df = pd.read_excel(file)
+            # Maak kolomnamen schoon: kleine letters en geen spaties eromheen
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
         
         df_db = load_db(EXCEL_FILE)
-        st.success("Productdatabase geladen!")
+        
+        # Laat voor de zekerheid de gevonden kolommen zien in de app (handig voor controle)
+        st.write("Gevonden kolommen in Excel:", list(df_db.columns))
 
-        pdf_file = st.file_uploader("Upload PDF om artikelen te matchen", type="pdf")
+        pdf_file = st.file_uploader("Upload PDF", type="pdf")
 
         if pdf_file and st.button("Start Analyse"):
             doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-            # Haal alle tekst uit PDF en zet in één grote string voor zoekopdracht
             full_pdf_text = " ".join([page.get_text() for page in doc]).replace("\n", " ")
             
             gevonden_items = []
             
-            # We lopen door de Excel en kijken of de Omschrijving of het Type voorkomt in de PDF
-            for _, row in df_db.iterrows():
-                # Pas hier de kolomnamen aan naar jouw Excel!
-                zoekterm = str(row['Omschrijving']).strip()
+            # We zoeken nu met flexibele kolomnamen (hoofdletterongevoelig)
+            # Pas deze namen hieronder aan als ze in het echt heel anders heten
+            col_omschrijving = "Omschrijving" 
+            col_artnr = "Art. Nr."
+            col_korting = "Kortingsgroep"
+
+            if col_omschrijving in df_db.columns:
+                for _, row in df_db.iterrows():
+                    zoekterm = str(row[col_omschrijving]).strip()
+                    
+                    if len(zoekterm) > 4 and zoekterm.lower() in full_pdf_text.lower():
+                        gevonden_items.append({
+                            "Art. Nr.": row.get(col_artnr, 'N/B'),
+                            "Kortingsgroep": row.get(col_korting, 'N/B'),
+                            "Omschrijving": zoekterm
+                        })
                 
-                if len(zoekterm) > 4 and zoekterm.lower() in full_pdf_text.lower():
-                    gevonden_items.append({
-                        "Art. Nr.": row.get('Art. Nr.', 'N/B'),
-                        "Kortingsgroep": row.get('Kortingsgroep', 'N/B'),
-                        "Omschrijving": zoekterm
-                    })
-            
-            if gevonden_items:
-                res_df = pd.DataFrame(gevonden_items).drop_duplicates()
-                st.dataframe(res_df)
-                
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    res_df.to_excel(writer, index=False)
-                st.download_button("Download Resultaat Excel", output.getvalue(), "match_resultaat.xlsx")
+                if gevonden_items:
+                    res_df = pd.DataFrame(gevonden_items).drop_duplicates()
+                    st.dataframe(res_df)
+                    
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        res_df.to_excel(writer, index=False)
+                    st.download_button("Download Resultaat Excel", output.getvalue(), "match_resultaat.xlsx")
+                else:
+                    st.warning("Geen matches gevonden.")
             else:
-                st.warning("Geen matches gevonden tussen de PDF en de Excel-database.")
+                st.error(f"Fout: De kolom '{col_omschrijving}' staat niet in je Excel. Check de lijst hierboven.")
 
 # --- FUNCTIE 2: VERGELIJKER (JOUW CODE) ---
 elif keuze == "PDF Vergelijker (Rood)":
@@ -101,3 +111,4 @@ elif keuze == "PDF naar Word":
             st.download_button("Download Word-bestand", f, "document.docx")
         os.remove("temp.pdf")
         os.remove("temp.docx")
+
